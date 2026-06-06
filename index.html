@@ -341,6 +341,147 @@ body{background:#0d0d1a;color:#cdd6f4;font-family:-apple-system,BlinkMacSystemFo
 </div>
 
 <script>
+// ── API 설정 ─────────────────────────────────────────
+const API_BASE = 'https://kangs-view-api.onrender.com';
+
+// ── API 호출 함수 ─────────────────────────────────────
+async function fetchAPI(endpoint) {
+  try {
+    const res = await fetch(API_BASE + endpoint);
+    const json = await res.json();
+    return json.status === 'ok' ? json.data : null;
+  } catch(e) {
+    console.error('API 오류:', e);
+    return null;
+  }
+}
+
+async function loadMarketData(market) {
+  let endpoint = '/api/sp500';
+  if (market === 'kospi' || market === 'kosdaq') endpoint = '/api/kospi';
+  const data = await fetchAPI(endpoint);
+  if (!data) return;
+
+  // 히트맵 업데이트
+  const grid = document.getElementById('hm-grid');
+  let html = '';
+  let up = 0, dn = 0, total = 0, sumChg = 0;
+  const isKr = market === 'kospi' || market === 'kosdaq';
+  const sectorColors = ['#1a2a1a','#2a1a1a','#1a2030','#2a1a2a','#2a2a1a','#1a2a2a'];
+
+  data.forEach((sec, si) => {
+    html += `<div class="hm-sector" style="background:${sectorColors[si % sectorColors.length]};">
+      <span class="hm-sec-lbl">${sec.sector}</span>
+      <div class="hm-cells">`;
+    sec.stocks.forEach(s => {
+      up += s.change > 0 ? 1 : 0;
+      dn += s.change < 0 ? 1 : 0;
+      total++;
+      sumChg += s.change;
+      html += `<div class="hm-cell" style="background:${cellBg(s.change)};"
+        onclick="openDetail('${s.ticker}','${s.name}',${s.change},${s.price},${isKr})">
+        <span class="hm-t">${s.ticker.replace('.KS','').replace('.KQ','')}</span>
+        <span class="hm-k">${s.name}</span>
+        <span class="hm-p">${fmtChg(s.change)}</span>
+      </div>`;
+    });
+    html += '</div></div>';
+  });
+
+  grid.innerHTML = html;
+  document.getElementById('sum-up').textContent = '▲ ' + up;
+  document.getElementById('sum-dn').textContent = '▼ ' + dn;
+  const avg = total > 0 ? sumChg / total : 0;
+  const avgEl = document.getElementById('sum-avg');
+  avgEl.textContent = fmtChg(avg);
+  avgEl.style.color = cc(avg);
+  document.getElementById('sum-total').textContent = total;
+
+  // 종목 리스트 업데이트
+  let allStocks = [];
+  data.forEach(sec => {
+    sec.stocks.forEach(s => {
+      allStocks.push({t: s.ticker.replace('.KS','').replace('.KQ',''), k: s.name, s: sec.sector, p: s.price, c: s.change, fullTicker: s.ticker});
+    });
+  });
+  window._currentStocks = allStocks;
+  renderStockListFromData(allStocks, isKr);
+}
+
+async function loadCoins() {
+  const data = await fetchAPI('/api/coins');
+  if (!data) return;
+  const coinNames = {
+    'BTC-USD':{name:'비트코인',sym:'BTC',icon:'₿',color:'rgba(247,147,26,.2)',ic:'#F7931A'},
+    'ETH-USD':{name:'이더리움',sym:'ETH',icon:'Ξ',color:'rgba(98,126,234,.2)',ic:'#627EEA'},
+    'SOL-USD':{name:'솔라나',sym:'SOL',icon:'◎',color:'rgba(153,101,21,.2)',ic:'#996615'},
+    'BNB-USD':{name:'바이낸스',sym:'BNB',icon:'B',color:'rgba(240,185,11,.2)',ic:'#F0B90B'},
+    'XRP-USD':{name:'리플',sym:'XRP',icon:'X',color:'rgba(83,74,183,.2)',ic:'#534AB7'},
+    'ADA-USD':{name:'에이다',sym:'ADA',icon:'A',color:'rgba(29,158,117,.2)',ic:'#0F6E56'},
+  };
+  let html = data.map(c => {
+    const info = coinNames[c.ticker] || {name:c.ticker,sym:'',icon:'?',color:'rgba(128,128,128,.2)',ic:'#888'};
+    return `<div class="coin-card">
+      <div class="coin-icon" style="background:${info.color};color:${info.ic};">${info.icon}</div>
+      <div class="coin-info">
+        <div class="coin-name">${info.name} <span class="coin-sym">${info.sym}</span></div>
+        <div class="coin-price">$${c.price.toLocaleString()}</div>
+      </div>
+      <div class="coin-right">
+        <div class="coin-chg" style="color:${cc(c.change)};">${fmtChg(c.change)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('asset-coin').innerHTML = html;
+}
+
+async function loadCommodities() {
+  const data = await fetchAPI('/api/commodities');
+  if (!data) return;
+  const names = {'GC=F':'금(Gold)','SI=F':'은(Silver)','CL=F':'WTI 원유','NG=F':'천연가스'};
+  const units = {'GC=F':'$/oz','SI=F':'$/oz','CL=F':'$/barrel','NG=F':'$/MMBtu'};
+  let html = data.map(c => `
+    <div class="commodity-card">
+      <div class="com-top">
+        <div class="com-name">${names[c.ticker]||c.ticker}</div>
+        <div class="com-right">
+          <div class="com-price">${c.price.toLocaleString()} <span style="font-size:9px;color:#555;">${units[c.ticker]||''}</span></div>
+          <div class="com-chg" style="color:${cc(c.change)};">${fmtChg(c.change)}</div>
+        </div>
+      </div>
+      <div class="com-chart">
+        <svg width="100%" height="50" viewBox="0 0 300 50" preserveAspectRatio="none">
+          <polygon points="0,35 50,30 100,38 150,25 200,20 250,15 300,12 300,50 0,50" fill="rgba(39,174,96,.08)"/>
+          <polyline points="0,35 50,30 100,38 150,25 200,20 250,15 300,12" stroke="${cc(c.change)}" stroke-width="1.5" fill="none"/>
+        </svg>
+      </div>
+    </div>`).join('');
+  document.getElementById('asset-commodity').innerHTML = html;
+}
+
+async function loadFX() {
+  const data = await fetchAPI('/api/fx');
+  if (!data) return;
+  const names = {'USDKRW=X':'달러/원','USDJPY=X':'달러/엔','EURUSD=X':'유로/달러','USDCNY=X':'달러/위안'};
+  let html = data.map(f => `
+    <div class="commodity-card">
+      <div class="com-top">
+        <div class="com-name">${names[f.ticker]||f.ticker}</div>
+        <div class="com-right">
+          <div class="com-price">${f.price.toLocaleString()}</div>
+          <div class="com-chg" style="color:${cc(f.change)};">${fmtChg(f.change)}</div>
+        </div>
+      </div>
+      <div class="com-chart">
+        <svg width="100%" height="50" viewBox="0 0 300 50" preserveAspectRatio="none">
+          <polygon points="0,32 50,28 100,35 150,22 200,18 250,14 300,10 300,50 0,50" fill="rgba(39,174,96,.08)"/>
+          <polyline points="0,32 50,28 100,35 150,22 200,18 250,14 300,10" stroke="${cc(f.change)}" stroke-width="1.5" fill="none"/>
+        </svg>
+      </div>
+    </div>`).join('');
+  document.getElementById('asset-fx').innerHTML = html;
+}
+
 // ── 데이터 ──────────────────────────────────────────
 const MARKETS = {
   sp500: {
@@ -579,10 +720,12 @@ function switchTab(tab, el) {
 
 function switchMarket(market, el) {
   currentMarket = market;
+  window._currentStocks = null;
   document.querySelectorAll('.subtab').forEach(t => t.classList.remove('on'));
   el.classList.add('on');
-  renderHeatmap();
-  renderStockList();
+  document.getElementById('hm-grid').innerHTML = '<div class="loading">실시간 데이터 로딩 중...</div>';
+  document.getElementById('stock-list').innerHTML = '<div class="loading">로딩 중...</div>';
+  loadMarketData(market);
 }
 
 function switchAsset(type, el) {
@@ -637,7 +780,34 @@ function renderHeatmap() {
 }
 
 // ── 종목 리스트 ──────────────────────────────────
+function renderStockListFromData(allStocks, isKr) {
+  let stocks = [...allStocks];
+  const q = (document.getElementById('stock-search') || {}).value || '';
+  if (q) stocks = stocks.filter(s => s.t.toLowerCase().includes(q.toLowerCase()) || s.k.includes(q));
+  if (currentSort === 'chg_desc') stocks.sort((a,b) => b.c - a.c);
+  else if (currentSort === 'chg_asc') stocks.sort((a,b) => a.c - b.c);
+  else stocks.sort((a,b) => a.k.localeCompare(b.k));
+  let html = stocks.map(s => `
+    <div class="si" onclick="openDetail('${s.fullTicker||s.t}','${s.k}',${s.c},${s.p},${isKr})">
+      <div class="si-left">
+        <div class="si-ticker">${s.t}</div>
+        <div class="si-kr">${s.k}</div>
+        <div class="si-sec">${s.s}</div>
+      </div>
+      <div class="si-right">
+        <div class="si-chg" style="color:${cc(s.c)};">${fmtChg(s.c)}</div>
+        <div class="si-price">${fmtPrice(s.p, isKr)}</div>
+      </div>
+    </div>`).join('');
+  document.getElementById('stock-list').innerHTML = html || '<div class="loading">검색 결과 없음</div>';
+}
+
 function renderStockList() {
+  if (window._currentStocks) {
+    const isKr = currentMarket === 'kospi' || currentMarket === 'kosdaq';
+    renderStockListFromData(window._currentStocks, isKr);
+    return;
+  }
   const market = MARKETS[currentMarket];
   let stocks = [...market.allStocks];
   const q = (document.getElementById('stock-search') || {}).value || '';
