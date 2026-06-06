@@ -1083,16 +1083,23 @@ function refreshAll() {
 }
 
 // ── 초기화 ───────────────────────────────────────
-renderHeatmap();
-renderStockList();
+// API 실시간 데이터 로드
+loadMarketData('sp500');
+loadCoins();
+loadCommodities();
+loadFX();
+// 정적 데이터
 renderPotential();
 renderSectors();
-renderCoins();
-renderCommodities();
-renderFX();
 renderNews();
 updateTime();
 setInterval(updateTime, 60000);
+setInterval(() => {
+  loadMarketData(currentMarket);
+  loadCoins();
+  loadCommodities();
+  loadFX();
+}, 300000);
 </script>
 </body>
 </html>
